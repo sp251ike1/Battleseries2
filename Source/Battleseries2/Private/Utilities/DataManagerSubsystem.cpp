@@ -1,0 +1,186 @@
+// DataManagerSubsystem.cpp
+#include "Utilities/DataManagerSubsystem.h"
+#include "Engine/DataTable.h"
+#include "Engine/StreamableManager.h"
+#include "Engine/AssetManager.h"
+#include "Data/Runtime/CoreTypes.h"
+#include "Data/Vehicles/Data_Seat.h"
+#include "Data/Weapons/Data_Weapon.h"
+#include "Data/Vehicles/Data_Vehicle.h"
+#include "Data/Weapons/VehicleWeapons/Data_VehicleWeapon.h"
+#include "Data/Weapons/Data_Projectile.h"
+#include "Data/Data_Attachments.h"
+#include "Data/Data_Camo.h"
+#include "Data/Weapons/WeaponDefaults.h"
+#include "Data/Vehicles/VehicleTypeDefinitions.h"
+#include "Utilities/GameInstance_Base.h"
+
+//1 BP parent of this
+//variabalize dt's instead of paths
+
+UDataManagerSubsystem::UDataManagerSubsystem()
+{
+
+}
+
+void UDataManagerSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    Super::Initialize(Collection);
+
+    LoadDataTables();
+}
+
+bool UDataManagerSubsystem::ShouldCreateSubsystem(UObject* Outer) const
+{
+    if (!Outer) return false;
+
+    UGameInstance_Base* GI = Cast<UGameInstance_Base>(Outer);
+    if (GI && GI->DataManagerSubsystemClass)
+    {
+        //return true if class being check is 1 assigned to GI
+        return GetClass() == GI->DataManagerSubsystemClass;
+    }
+
+    return false;
+}
+
+void UDataManagerSubsystem::LoadDataTables()
+{
+    FStreamableManager& Streamable = UAssetManager::GetStreamableManager();
+    UE_LOG(LogTemp, Warning, TEXT("DataManagerSubsystem instance: %s"), *GetName());
+    UE_LOG(LogTemp, Warning, TEXT("VehicleDT: %s"), VehicleDataTableAsset.IsValid() ? TEXT("Valid") : TEXT("Null"));
+    UE_LOG(LogTemp, Warning, TEXT("ProjectileDT: %s"), ProjectileDataTableAsset.IsValid() ? TEXT("Valid") : TEXT("Null"));
+
+    VehicleDataTable = VehicleDataTableAsset.LoadSynchronous();
+    VehicleWeaponDataTable = VehicleWeaponDataTableAsset.LoadSynchronous();
+    ProjectileDataTable = ProjectileDataTableAsset.LoadSynchronous();
+    AttachmentDataTable = AttachmentDataTableAsset.LoadSynchronous();
+    CamoDataTable = CamoDataTableAsset.LoadSynchronous();
+
+    for (auto& Pair : VehicleArchetypeMap)
+    {
+        E_VehicleType Type = Pair.Key;
+        TSoftObjectPtr<UDA_VehicleTypeDefintion> SoftPtr = Pair.Value;
+        UDA_VehicleTypeDefintion* LoadedAsset = SoftPtr.LoadSynchronous();
+        LoadedVehicleArchetypes.Add(Type, LoadedAsset);
+    }
+    UE_LOG(LogTemp, Warning, TEXT("DataManager: Total Archetypes Loaded: %d"), LoadedVehicleArchetypes.Num());
+
+    CoreTypeDefinitionsDataAsset = CoreTypeDefinitionsDAAsset.LoadSynchronous();
+    WeaponDefaultsDataAsset = WeaponDefaultsDAAsset.LoadSynchronous();
+
+    check(VehicleDataTable && VehicleWeaponDataTable && ProjectileDataTable);
+
+    bDataReady = true;
+    UE_LOG(LogTemp, Warning, TEXT("[DataManagerSubsystem::LoadDataTables] Data tables are loaded"));
+    OnDataReady.Broadcast();
+}
+
+FVehicleData UDataManagerSubsystem::GetVehicleDataRowCopy(FName RowName) const
+{
+    const FVehicleData* VehicleData = VehicleDataTable->FindRow<FVehicleData>(RowName, TEXT("VehicleDataLookup"));
+    return *VehicleData;
+}
+
+FVehicleWeaponData UDataManagerSubsystem::GetVehicleWeaponDataRowCopy(FName RowName) const
+{
+    const FVehicleWeaponData* VehicleWeaponData = VehicleWeaponDataTable->FindRow<FVehicleWeaponData>(RowName, TEXT("VehicleWeaponDataLookup"));
+    return *VehicleWeaponData;
+}
+
+FAttachmentData UDataManagerSubsystem::GetAttachmentDataRowCopy(FName RowName) const
+{
+    const FAttachmentData* AttachmentData = AttachmentDataTable->FindRow<FAttachmentData>(RowName, TEXT("AttachmentDataLookup"));
+    return *AttachmentData;
+}
+
+FProjectileData UDataManagerSubsystem::GetProjectileDataRowCopy(FName RowName) const
+{
+    const FProjectileData* ProjectileData = ProjectileDataTable->FindRow<FProjectileData>(RowName, TEXT("ProjectileDataLookup"));
+    return *ProjectileData;
+}
+
+//const because we want the pointer to be read-only (dont wanna modify table data)
+const FVehicleData* UDataManagerSubsystem::GetVehicleDataRow(FName RowName) const
+{
+    const FVehicleData* VehicleDataPtr = VehicleDataTable->FindRow<FVehicleData>(RowName, TEXT("VehicleDataLookup"));
+    return VehicleDataPtr;
+}
+
+const FVehicleWeaponData* UDataManagerSubsystem::GetVehicleWeaponDataRow(FName RowName) const
+{
+    const FVehicleWeaponData* VehicleWeaponDataPtr = VehicleWeaponDataTable->FindRow<FVehicleWeaponData>(RowName, TEXT("VehicleWeaponDataLookup"));
+    return VehicleWeaponDataPtr;
+}
+
+const FAttachmentData* UDataManagerSubsystem::GetAttachmentDataRow(FName RowName) const
+{
+    const FAttachmentData* AttachmentDataPtr = AttachmentDataTable->FindRow<FAttachmentData>(RowName, TEXT("AttachmentDataLookup"));
+    return AttachmentDataPtr;
+}
+
+const FProjectileData* UDataManagerSubsystem::GetProjectileDataRow(FName RowName) const
+{
+    const FProjectileData* ProjectileDataPtr = ProjectileDataTable->FindRow<FProjectileData>(RowName, TEXT("ProjectileDataLookup"));
+    return ProjectileDataPtr;
+}
+
+const FCamoData* UDataManagerSubsystem::GetCamoDataRow(FName RowName) const
+{
+    const FCamoData* CamoDataPtr = CamoDataTable->FindRow<FCamoData>(RowName, TEXT("CamoDataLookup"));
+    return CamoDataPtr;
+}
+
+TArray<FName> UDataManagerSubsystem::GetAllVehicleIDs() const
+{
+    UDataTable* VehicleDT = GetVehicleDataTable();
+    TArray<FName> AllVehicleRowNames = VehicleDT->GetRowNames();
+    return AllVehicleRowNames;
+}
+
+TArray<FName> UDataManagerSubsystem::GetAllProjectileIDs() const
+{
+    UDataTable* ProjectileDT = GetProjectileDataTable();
+    TArray<FName> AllProjectileRowNames = ProjectileDT->GetRowNames();
+    return AllProjectileRowNames;
+}
+
+FName UDataManagerSubsystem::GetFirstVehicleIDOfType(E_VehicleType VehicleType) const
+{
+    TArray<FName> VehicleIDs = GetAllVehicleIDs();
+    FName VehicleIDofType;
+    for (FName VehicleID : VehicleIDs)
+    {
+        const FVehicleData* VehicleData = GetVehicleDataRow(VehicleID);
+        if (VehicleData->Vehicle_Type == VehicleType)
+        {
+            VehicleIDofType = VehicleID;
+            break;
+        }
+    }
+    return VehicleIDofType;
+}
+
+FText UDataManagerSubsystem::GetWeaponSlotName(int32 WeaponSlotIndex)
+{
+    FText WeaponSlotName = WeaponDefaultsDataAsset->WeaponDefaults.WeaponSlotNames[WeaponSlotIndex];
+    return WeaponSlotName;
+}
+
+UDA_VehicleTypeDefintion* UDataManagerSubsystem::GetVehicleArchetypeDefinition(E_VehicleType VehicleType)
+{
+    UDA_VehicleTypeDefintion* const* FoundAssetPtr = LoadedVehicleArchetypes.Find(VehicleType);
+    return *FoundAssetPtr;
+}
+
+void UDataManagerSubsystem::PreloadCoreAssets()
+{
+    //FStreamableManager& StreamableManager = UAssetManager::GetStreamableManager();
+    //TArray<FSoftObjectPath> AssetsToLoad;
+    //example: add vehicle meshes, etc
+
+    //StreamableManager.RequestAsyncLoad(AssetsToLoad, FStreamableDelegate::CreateLambda([]()
+    //{
+      //      UE_LOG(LogTemp, Log, TEXT("Core assets preloaded successfully."));
+    //}));
+}

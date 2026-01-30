@@ -1,0 +1,800 @@
+// Fill out your copyright notice in the Description page of Project Settings.
+
+#include "Vehicle_Base.h"
+#include "GameFramework/PlayerController.h"			//need because we currently call setviewtarget
+#include "Camera/CameraActor.h"
+#include "Data/Vehicles/Data_Vehicle.h"				//need to access members
+#include "Data/Vehicles/Data_Seat.h"				//need to access members
+#include "Data/Data_Attachments.h"
+#include "Utilities/ProjectilePoolSubsystem.h"
+#include "Utilities/HelperFunctions_Vehicle.h"
+#include "Core/Weapons/Projectiles/Projectile_Base.h"
+#include "Core/Weapons/VehicleWeaponLogicComponent.h"
+#include "Core/Vehicles/ChaosWheel_Base.h"
+#include "Core/PlayerController_Base.h"
+#include "Core/UI/VehicleHUDs/UW_HUD_Vehicle_Base.h"
+#include "Save/PlayerSave_Loadout.h"
+#include "Save/SaveSubsystem.h"
+#include "Utilities/GameInstance_Base.h"
+#include "Utilities/HUDSubsystem.h"
+#include "InputAction.h"
+#include "Character_Base.h"							//need to access LSI, CSI, NSI... and probably other things
+#include "Kismet/GameplayStatics.h"
+#include "TimerManager.h"
+#include "PhysicsEngine/PhysicsAsset.h"
+#include "Components/AudioComponent.h"
+
+// Sets default values
+AVehicle_Base::AVehicle_Base()
+{
+ 	// Set this pawn to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
+	PrimaryActorTick.bCanEverTick = true;
+	VehicleMeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("VehicleMeshComponent"));
+	ChaosVehicleMovement = CreateDefaultSubobject<UChaosWheeledVehicleMovementComponent>(TEXT("ChaosWheeledVehicleMovementComponent"));
+	ChaosVehicleMovement->bAutoRegister = false;
+	ChaosVehicleMovement->bAutoActivate = false;
+	InteractionWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("Interaction Widget"));
+	VehicleWeaponLogicComponent = CreateDefaultSubobject<UVehicleWeaponLogicComponent>(TEXT("Vehicle Weapon Logic Component"));
+	RootComponent = VehicleMeshComponent;
+	InteractionWidgetComponent->SetupAttachment(VehicleMeshComponent, "InteractIcon");
+}
+
+// Called when the game starts or when spawned
+void AVehicle_Base::BeginPlay()
+{
+	Super::BeginPlay();
+	DataManager = GetWorld()->GetGameInstance()->GetSubsystem<UDataManagerSubsystem>();
+	SaveSubsystem = GetWorld()->GetGameInstance()->GetSubsystem<USaveSubsystem>();
+
+	if (!VehicleStartingData.VehicleID.IsNone())
+	{
+		if (DataManager->IsDataReady())
+		{
+			Init_VehicleData();
+		}
+		else
+		{
+			DataManager->OnDataReady.AddDynamic(this, &AVehicle_Base::Init_VehicleData);
+		}
+	}
+}
+
+// Called every frame
+void AVehicle_Base::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+	//UpdateSeatRangefinders();
+}
+
+// Called to bind functionality to input
+void AVehicle_Base::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+{
+	Super::SetupPlayerInputComponent(PlayerInputComponent);
+}
+
+//GROUND VEHICLE FUNCTIONS
+void AVehicle_Base::Init_Wheels()
+{
+	const TArray <FChaosWheelSetup>& WheelData = VehicleData->GroundVehicle_Data.WheelData;
+	const TArray <FBaseWheelData>& BaseWheelData = VehicleData->GroundVehicle_Data.BaseWheelData;
+
+	ChaosVehicleMovement->WheelSetups.Empty();
+	ChaosVehicleMovement->Wheels.Empty();
+
+	ChaosVehicleMovement->WheelSetups.SetNum(WheelData.Num());
+	for (int32 i = 0; i < WheelData.Num(); i++)
+	{
+		const FChaosWheelSetup& SourceData = WheelData[i];				//the data we are pulling from
+		FChaosWheelSetup& Setup = ChaosVehicleMovement->WheelSetups[i];	//the properties we are applying to
+		Setup.WheelClass = SourceData.WheelClass;
+		
+		if (SourceData.WheelClass && SourceData.WheelClass->IsChildOf(UChaosWheel_Base::StaticClass()))
+		{
+			//Setup.WheelClass = SourceData.WheelClass;
+			UChaosWheel_Base* WheelDefault = Setup.WheelClass->GetDefaultObject<UChaosWheel_Base>();		//WHEEL CLASS MUST BE THIS TYPE
+			WheelDefault->Init_Wheel(BaseWheelData[i]);
+		}	
+	
+		Setup.BoneName = SourceData.BoneName;							//set bone name
+		Setup.AdditionalOffset = SourceData.AdditionalOffset;			//set additional offset
+	}
+}
+
+void AVehicle_Base::Init_GroundVehicle()
+{
+	VehicleMeshComponent->RecreatePhysicsState();
+	ChaosVehicleMovement->UnregisterComponent();
+	ChaosVehicleMovement->SetUpdatedComponent(VehicleMeshComponent);
+	Init_Wheels();
+
+	//Mechanical Setup
+	ChaosVehicleMovement->EnableMechanicalSim(true);	//true by default, not in DTs
+	ChaosVehicleMovement->EngineSetup = VehicleData->GroundVehicle_Data.EngineData;
+	ChaosVehicleMovement->DifferentialSetup = VehicleData->GroundVehicle_Data.DifferentialData;
+	ChaosVehicleMovement->TransmissionSetup = VehicleData->GroundVehicle_Data.TransmissionData;
+	ChaosVehicleMovement->SteeringSetup = VehicleData->GroundVehicle_Data.SteeringData;
+	
+	//Vehicle Setup
+	ChaosVehicleMovement->Mass = VehicleData->GroundVehicle_Data.Mass;
+	ChaosVehicleMovement->CenterOfMassOverride = VehicleData->GroundVehicle_Data.Center_Of_Mass_Override;
+
+	//Vehicle Input
+	//Yaw Input Rate
+	ChaosVehicleMovement->YawInputRate.RiseRate = VehicleData->GroundVehicle_Data.Yaw_Input_Rise_Rate;
+	ChaosVehicleMovement->YawInputRate.FallRate = VehicleData->GroundVehicle_Data.Yaw_Input_Fall_Rate;
+
+	//allows the vehicle/chaos vehicle to actual simulate physics properly
+	HandleChaosMovement(true);
+	ChaosVehicleMovement->RegisterComponent();
+	ChaosVehicleMovement->RecreatePhysicsState();;
+	VehicleMeshComponent->InitAnim(true);
+}
+
+void AVehicle_Base::HandleChaosMovement(bool turnon)
+{
+	if (turnon)
+	{
+		ChaosVehicleMovement->Activate();
+		ChaosVehicleMovement->SetComponentTickEnabled(true);
+	}
+	else
+	{
+		ChaosVehicleMovement->Deactivate();
+		ChaosVehicleMovement->SetComponentTickEnabled(false);
+	}
+}
+
+//HELICOPTER FUNCTIONS
+void AVehicle_Base::Init_Helicopter()
+{
+
+}
+
+//SEAT FUNCTIONS
+void AVehicle_Base::Init_SeatCamera(int32 SeatIndex)
+{
+	//init default seat camera
+	//every seat that is remote should do this
+	//how does this work with ConfigureWeaponCam on VehicleWeaponLogicComp???????????????
+	E_ViewMethod ViewMethod = VehicleData->Seats[SeatIndex].ViewMethod;
+	FString CameraSocketString = FString::Printf(TEXT("SC_%02d"), SeatIndex);		//SeatCam_SeatIndex		[SC_00]
+	FName CameraSocketName = FName(*CameraSocketString);
+	UCameraComponent* NewCamera;
+	switch (ViewMethod)
+	{
+		case E_ViewMethod::Windowed:
+			break;
+		case E_ViewMethod::Remote:
+			NewCamera = SpawnAndAttachCamera(CameraSocketName, VehicleMeshComponent);
+			VehicleCurrentState.SeatStates[SeatIndex].DefaultCamera = NewCamera;
+			UpdateSeatActiveCamera(SeatIndex, NewCamera);
+			break;
+	}
+}
+
+void AVehicle_Base::Init_Seats()
+{
+	VehicleCurrentState.SeatStates.SetNum(VehicleData->Seats.Num());
+	for (int32 i = 0; i < VehicleData->Seats.Num(); ++i)
+	{
+		const FSeatData& SeatInfo = VehicleData->Seats[i];
+
+		//do Seat Role specific stuff TO THE SEAT (init default weapon system here?)
+		switch (SeatInfo.SeatRole)
+		{
+			case E_SeatRole::Driver:
+				break;
+			case E_SeatRole::Gunner:
+			case E_SeatRole::DriverGunner:
+			case E_SeatRole::Passenger:
+				break;
+		}
+		Init_SeatCamera(i);		//<---mainly for windowed/remote cameras right now (weapon defaults?)
+	}
+
+	OnSeatsInitialized.Broadcast();		//here so we can guarantee ALL NEW SEATS ARE SETUP (race conditions suck)
+	UE_LOG(LogTemp, Error, TEXT("[Vehicle_Base::Init_Seats] STEP 2B FINISHED (end of Init_Seats). old seats destroyed. new seats spawned in, VehicleID = %s"), *VehicleStartingData.VehicleID.ToString());
+}
+
+//GENERIC FUNCTIONS
+void AVehicle_Base::Init_VehicleMesh(USkeletalMesh* LoadedSkeletalMesh)
+{
+	//assumes the mesh loaded correctly/is valid
+	//assumes there is physics asset tied to skelmeh by defaults
+	VehicleMeshComponent->SetSkeletalMesh(LoadedSkeletalMesh);
+	VehicleMeshComponent->SetSimulatePhysics(true);
+	VehicleMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	VehicleMeshComponent->SetCollisionObjectType(ECollisionChannel::ECC_Vehicle);
+	VehicleMeshComponent->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+}
+
+void AVehicle_Base::Init_VehicleMesh_Preview(USkeletalMesh* LoadedSkeletalMesh)
+{
+	VehicleMeshComponent->SetSkeletalMesh(LoadedSkeletalMesh);
+
+	if (!VehicleData->Preview_PhysicsAsset.IsNull())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("Physics Asset is valid"));
+		UPhysicsAsset* LoadedAsset = VehicleData->Preview_PhysicsAsset.LoadSynchronous();
+		VehicleMeshComponent->SetPhysicsAsset(LoadedAsset, true);
+	}
+	VehicleMeshComponent->SetSimulatePhysics(true);
+	VehicleMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	VehicleMeshComponent->SetCollisionObjectType(ECollisionChannel::ECC_Vehicle);
+	VehicleMeshComponent->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+	OnMeshReady.Broadcast();
+}
+
+void AVehicle_Base::Init_VehicleAnim(TSubclassOf<UAnimInstance> Anim_Class)
+{
+	//assumes mesh and anim class are valid
+	VehicleMeshComponent->SetAnimInstanceClass(Anim_Class);
+}
+
+void AVehicle_Base::Init_VehicleData()			//(load vehicle data)
+{
+	//1. load base vehicle data row
+	VehicleData = DataManager->GetVehicleDataRow(VehicleStartingData.VehicleID);
+
+	//2. Asynchronously load assets (mesh, anim class)
+	TArray<FSoftObjectPath> AssetsToLoad;
+	AssetsToLoad.Add(VehicleData->Vehicle_Mesh.ToSoftObjectPath());
+	AssetsToLoad.Add(VehicleData->Anim_Class.ToSoftObjectPath());
+	
+	FStreamableManager* StreamableManager = Cast<UGameInstance_Base>(UGameplayStatics::GetGameInstance(this))->GetStreamableManager();
+	StreamableManager->RequestAsyncLoad(AssetsToLoad, FStreamableDelegate::CreateUObject(this, &AVehicle_Base::Init_DetermineVehicleBuildBehavior));
+}
+
+void AVehicle_Base::Init_DetermineVehicleBuildBehavior()
+{
+	if (VehicleStartingData.PreviewVehicle)
+	{
+		Init_Vehicle_Preview();
+	}
+	else
+	{
+		Init_Vehicle();
+	}
+}
+
+void AVehicle_Base::Init_Vehicle()
+{
+	Init_VehicleMesh(VehicleData->Vehicle_Mesh.Get());
+	Init_VehicleAnim(VehicleData->Anim_Class.Get());
+	Init_Seats();
+	VehicleWeaponLogicComponent->Init_VehicleWeaponSystem(VehicleStartingData.StartingVehicleLoadout.SeatLoadout);		//weapons and turrets
+	switch (VehicleData->Movement_Type)
+	{
+		case E_MovementType::GroundVehicle:
+			UE_LOG(LogTemp, Log, TEXT("GROUND VEHICLE SETUP STARTED"));
+			Init_GroundVehicle();
+			Init_Horn(VehicleData->GroundVehicle_Data.HornAudio);
+			break;
+		case E_MovementType::Helicopter:
+			UE_LOG(LogTemp, Log, TEXT("HELICOPTER SETUP STARTED"));
+			HandleChaosMovement(false);
+			break;
+		case E_MovementType::Jet:
+			UE_LOG(LogTemp, Log, TEXT("JET SETUP STARTED"));
+			break;
+		case E_MovementType::Boat:
+			UE_LOG(LogTemp, Log, TEXT("BOAT SETUP STARTED"));
+			break;
+	}
+	ApplyCamoToVehicle(VehicleStartingData.StartingVehicleLoadout.VehicleCamo);
+}
+
+void AVehicle_Base::Init_Horn(USoundBase* HornAudio)
+{
+	if (!HornAudio)
+	{
+		return;
+	}
+
+	VehicleCurrentState.GenericVehicleState.HornAudioComponent = NewObject<UAudioComponent>(this, UAudioComponent::StaticClass());
+	VehicleCurrentState.GenericVehicleState.HornAudioComponent->RegisterComponent();
+	VehicleCurrentState.GenericVehicleState.HornAudioComponent->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+	VehicleCurrentState.GenericVehicleState.HornAudioComponent->SetSound(Cast<USoundBase>(HornAudio));
+}
+
+void AVehicle_Base::PlayHorn()
+{
+	VehicleCurrentState.GenericVehicleState.HornAudioComponent->Play(0.0f);
+	FTimerHandle TimerHandle;
+	GetWorldTimerManager().SetTimer(TimerHandle, this, &AVehicle_Base::StopHorn, 4.0f, false);
+}
+
+void AVehicle_Base::StopHorn()
+{
+	VehicleCurrentState.GenericVehicleState.HornAudioComponent->Stop();
+}
+
+void AVehicle_Base::Init_Vehicle_Preview()
+{
+	Init_VehicleMesh_Preview(VehicleData->Vehicle_Mesh.Get());
+	Init_Seats();
+	VehicleWeaponLogicComponent->SetComponentTickEnabled(false);
+	VehicleWeaponLogicComponent->Init_VehicleWeaponSystem(VehicleStartingData.StartingVehicleLoadout.SeatLoadout);		//weapons and turrets
+	ApplyCamoToVehicle(VehicleStartingData.StartingVehicleLoadout.VehicleCamo);
+}
+
+void AVehicle_Base::SetVehicleAndInit(FVehicleStartingData InputVehicleStartingData)
+{
+	//PROBLEM: with vehicle with things like wheels, this currently isnt clearing that (reason to switch to pooling maybe?)
+	UE_LOG(LogTemp, Error, TEXT("VEHICLE REINIT STARTED, SEATS INITIALIZED NOW FALSE"));
+	VehicleStartingData = InputVehicleStartingData;
+	Init_VehicleData();
+}
+
+void AVehicle_Base::UpdateSeatRangefinders()
+{
+	//for each seat, if seat is a gunner and if occupied, fire rangefinder based on view method context
+	if (!VehicleData)
+	{
+		return;
+	}
+
+
+}
+
+void AVehicle_Base::UpdateSeatList_AllOccupants()
+{
+	//update seat list/call update seat list function on character side for each character in vehicle
+	TArray<AActor*> AttachedActors;
+	GetAttachedActors(AttachedActors);
+	TArray<ACharacter_Base*> Characters;
+	for (AActor* Actor : AttachedActors)
+	{
+		if (ACharacter_Base* CastedChar = Cast<ACharacter_Base>(Actor))
+		{
+			Characters.Add(CastedChar);
+		}
+	}
+	for (ACharacter_Base* Character : Characters)
+	{
+		Character->UpdateSeatList(Characters);
+		//call update seat list function on charcter side
+		//has ref to vehicle, which means it can pull its state and see if its occupied
+		//if need be character side function can even have an input of character array to get characters names, etc
+		//this avoids hard coupling characters and vehicles
+	}
+}
+
+void AVehicle_Base::ApplyLoadoutToSeat(int32 SeatIndex)		//this functions applies everything in the loadout (weapons, optics, upgrades, camos (if applicable), etc)
+{
+	//now only called by ApplyLoadoutToVehicle when enter main seat (driver/drivergunner) and is then applied TO EVERY SEAT
+	//by loadout we mean gunner/drivergunner type shiii
+	switch (VehicleData->Seats[SeatIndex].SeatRole)
+	{
+		case E_SeatRole::DriverGunner:
+		case E_SeatRole::Gunner:
+			VehicleWeaponLogicComponent->HandleApplyWeaponsToSeat(SeatIndex);
+			break;
+	}
+}
+
+void AVehicle_Base::ApplyLoadoutToVehicle()
+{
+	for (int32 i = 0; i < VehicleData->Seats.Num(); i++)
+	{
+		ApplyLoadoutToSeat(i);
+	}
+	ApplyCamoToVehicle(SaveSubsystem->GetVehicleLoadout(VehicleData->Vehicle_Type).VehicleCamo);
+}
+
+void AVehicle_Base::ApplyCamoToVehicle(FName CamoID)
+{
+	for (int32 i = 0; i < VehicleMeshComponent->GetNumMaterials(); i++)
+	{
+		VehicleMeshComponent->SetMaterial(i, nullptr);
+	}
+
+	if (CamoID == NAME_None) return;
+
+	const FVehicleCamoData* CamoDataPtr = VehicleData->AvailableCamos.Find(CamoID);
+	if (!CamoDataPtr)
+	{
+		//here for current crash sake (certain vehicles of type simply dont have a camo that might be saved
+		//consider redoing how vehicle loadouts are saved (save by id instead of type)
+		return;
+	}
+	const FVehicleCamoData& CamoData = *CamoDataPtr;
+	//apply camo to main body
+	for (auto& CamoMeshPair : CamoData.MaterialElementIndexMap)
+	{
+		int32 MaterialIndex = CamoMeshPair.Key;
+		UMaterialInstance* Camo = CamoMeshPair.Value;
+		VehicleMeshComponent->CreateDynamicMaterialInstance(MaterialIndex, Camo);
+	}
+	
+	//apply camo to WEAPON attachments (main weapon mesh + decorative attachments)
+	for (auto& SeatWeaponSystem : VehicleWeaponLogicComponent->VehicleWeaponSystem)
+	{
+		FVehicleWeaponSystem_Runtime& WeaponSystem = SeatWeaponSystem.Value;
+		//main weapon mesh attachment
+		if (SeatWeaponSystem.Value.VehicleWeaponSystemState.WeaponSystemMesh.IsValid())
+		{
+			ApplyCamoToAttachment(WeaponSystem.VehicleWeaponSystemState.WeaponSystemMesh.Get(), WeaponSystem.VehicleWeaponSystemState.WSAttachmentID, CamoID);
+		}
+
+		//weapon decorative attachments
+		for (FVehicleWeapon_Runtime& WeaponSlot : WeaponSystem.Weapons)
+		{
+			for (FDecorative_Runtime& Decorative : WeaponSlot.VehicleWeaponState.VehicleWeaponDecoratives)
+			{
+				ApplyCamoToAttachment(Decorative.DecorativeMesh.Get(), Decorative.DecorativeAttachmentID, CamoID);
+			}
+		}
+	}
+	VehicleCurrentState.GenericVehicleState.CurrentCamo = CamoID;
+}
+
+void AVehicle_Base::ApplyCamoToAttachment(TWeakObjectPtr<UMeshComponent> Mesh, FName AttachmentID, FName CamoID)
+{
+	if (!Mesh.IsValid() || AttachmentID == NAME_None || CamoID == NAME_None) return;
+
+	const FAttachmentData& AttachmentData = *DataManager->GetAttachmentDataRow(AttachmentID);
+	const FAttachmentCamoData* CamoData = AttachmentData.AvailableCamos.Find(CamoID);
+	if (!CamoData)
+	{
+		// This happens if this specific attachment doesn't have the selected Camo assigned
+		return;
+	}
+	for (const auto& MatPair : CamoData->MaterialElementIndexMap)
+	{
+		Mesh->CreateDynamicMaterialInstance(MatPair.Key, MatPair.Value);
+	}
+}
+
+void AVehicle_Base::ClearLoadoutFromSeat(int32 SeatIndex)
+{
+	VehicleWeaponLogicComponent->ClearWeaponSystemFromSeat(SeatIndex);
+	//countermeasures
+	//optics
+	//upgrades
+}
+
+void AVehicle_Base::ClearEntireLoadoutFromVehicle()
+{
+	VehicleWeaponLogicComponent->ClearEntireWeaponSystemFromVehicle();
+	//clear camo
+	VehicleCurrentState.GenericVehicleState.CurrentCamo = NAME_None;
+}
+
+UCameraComponent* AVehicle_Base::SpawnAndAttachCamera(FName SocketToAttach, USkeletalMeshComponent* MeshToAttachTo)
+{
+	UCameraComponent* Cam = NewObject<UCameraComponent>(this);
+	Cam->SetupAttachment(MeshToAttachTo, SocketToAttach);
+	Cam->RegisterComponent();
+	return Cam;
+}
+
+bool AVehicle_Base::CycleThroughSeats(ACharacter_Base* Character)
+{
+	int32 TotalSeats = VehicleData->Seats.Num();
+	int32 StartIndex = Character->CharacterState.CharacterVehicleState.CSI;
+	int32 Offset = (TotalSeats == 1) ? 0 : 1;
+
+	//try each seat exactly once, skipping the current seat
+	for (; Offset < TotalSeats; ++Offset)
+	{
+		int32 CheckIndex = (StartIndex + Offset) % TotalSeats;		//wraps around the seat list circularly, so if you’re at the last seat, it loops back to seat 0.
+		UE_LOG(LogTemp, Warning, TEXT("Seat that we are checking: %d"), CheckIndex);
+		if (!VehicleCurrentState.SeatStates[CheckIndex].isOccupied)
+		{
+			Character->UpdateSeatIndexes(Character->CharacterState.CharacterVehicleState.CSI, CheckIndex, CheckIndex);
+
+			UE_LOG(LogTemp, Warning, TEXT("Switched to seat %d"), CheckIndex);
+			return true;
+		}
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("No available seats to switch to"));
+	return false;
+}
+
+void AVehicle_Base::HandleViewMethod(ACharacter_Base* Character, const FSeatData& SeatData)
+{
+	if (SeatData.SeatRole == E_SeatRole::DriverGunner || SeatData.SeatRole == E_SeatRole::Gunner)
+	{
+		const FVehicleWeaponSystem_Runtime& VWS = *VehicleWeaponLogicComponent->VehicleWeaponSystem.Find(Character->CharacterState.CharacterVehicleState.CSI);
+		const FVehicleWeapon_Runtime& EquippedWeapon = VWS.Weapons[VWS.VehicleWeaponSystemState.EquippedWeaponState.CurrentWeaponIndex];
+		if (EquippedWeapon.VehicleWeaponInstanceData.bHasSpecialCam)
+		{
+			TWeakObjectPtr<AActor> ViewTarget = nullptr;
+			TWeakObjectPtr<UCameraComponent> Cam = VehicleCurrentState.SeatStates[Character->CharacterState.CharacterVehicleState.CSI].ActiveCamera;
+			switch (EquippedWeapon.VehicleWeaponInstanceData.WeaponCamBehavior.MountMethod)
+			{
+				case EVehicleWeaponCamMountMethod::VehicleMesh:
+				case EVehicleWeaponCamMountMethod::WeaponMesh:
+				case EVehicleWeaponCamMountMethod::MountedProjectile:
+					ViewTarget = VehicleWeaponLogicComponent->GetCurrentViewTargetAtSeatIndex(Character->CharacterState.CharacterVehicleState.CSI);
+					Character->UpdateViewTarget(ViewTarget, Cam);
+					break;
+			}
+		}
+		else
+		{
+			HandleViewMethod_Default(Character, SeatData);
+		}
+	}
+	else
+	{
+		HandleViewMethod_Default(Character, SeatData);
+	}
+}
+
+void AVehicle_Base::HandleViewMethod_Default(ACharacter_Base* Character, const FSeatData& SeatData)
+{
+	switch (SeatData.ViewMethod)
+	{
+		case E_ViewMethod::Windowed:
+			Character->UpdateViewTarget(Character, Character->Camera);
+			break;
+		case E_ViewMethod::Remote:
+			if (VehicleCurrentState.SeatStates[Character->CharacterState.CharacterVehicleState.CSI].ActiveCamera)
+			{
+
+				Character->UpdateViewTarget(this, VehicleCurrentState.SeatStates[Character->CharacterState.CharacterVehicleState.CSI].ActiveCamera);
+			}
+			else
+			{
+				Character->UpdateViewTarget(this, VehicleCurrentState.SeatStates[Character->CharacterState.CharacterVehicleState.CSI].DefaultCamera);
+			}
+			break;
+	}
+}
+
+void AVehicle_Base::HandleSeatOccupationStatus(bool Occupy, int32 SeatIndex)
+{
+	if (Occupy)
+	{
+		VehicleCurrentState.SeatStates[SeatIndex].isOccupied = true;
+	}
+	else
+	{
+		VehicleCurrentState.SeatStates[SeatIndex].isOccupied = false;
+	}
+}
+
+void AVehicle_Base::DropSeat(ACharacter_Base* Character)
+{
+	//should usually be LSI
+	const FSeatData& SeatData = VehicleData->Seats[Character->CharacterState.CharacterVehicleState.LSI];
+	HandleSeatOccupationStatus(false, Character->CharacterState.CharacterVehicleState.LSI);
+	Character->ManageIMC(SeatData.InputMappingContext, nullptr, 0);
+	if (SeatData.ViewMethod == E_ViewMethod::Remote)
+	{
+		if (VehicleCurrentState.SeatStates[Character->CharacterState.CharacterVehicleState.LSI].ActiveCamera)
+		{
+			VehicleCurrentState.SeatStates[Character->CharacterState.CharacterVehicleState.LSI].ActiveCamera->SetActive(false);
+		}
+	}
+	switch (SeatData.SeatRole)
+	{
+		case E_SeatRole::Driver:
+		case E_SeatRole::DriverGunner:
+			DropDriver();
+			break;
+	}
+}
+
+void AVehicle_Base::SetupNewSeat(ACharacter_Base* Character)
+{
+	//should usually be CSI
+	UE_LOG(LogTemp, Log, TEXT("SETUP NEW SEAT"));
+
+	const FSeatData& SeatData = VehicleData->Seats[Character->CharacterState.CharacterVehicleState.CSI];
+
+	HandleSeatOccupationStatus(true, Character->CharacterState.CharacterVehicleState.CSI);
+	UpdateSeatList_AllOccupants();
+	Character->SetActorRelativeTransform(SeatData.SeatTransform); //do this somewhere else?
+	Character->UpdateCharacterStance(SeatData.SeatStance); //do this somewhere else?
+	Character->ManageIMC(nullptr, SeatData.InputMappingContext, 1);
+	Character->UpdateCharacterMeshVisibility(!SeatData.bIsCharacterVisible);
+	//add seat hud
+	if (SeatData.SeatHUD)
+	{
+		Character->UpdateVehicleHUD(SeatData.SeatHUD);
+	}
+
+	UE_LOG(LogTemp, Error, TEXT("[Vehicle_Base::SetupNewSeat] ApplyLoadoutToSeat will be fired here"));
+	switch (SeatData.SeatRole)
+	{
+		case E_SeatRole::Driver:
+			ApplyLoadoutToVehicle();
+			SetupDriver(Character);
+			break;
+		case E_SeatRole::Gunner:
+			SetupGunner(Character);
+			break;
+		case E_SeatRole::DriverGunner:
+			ApplyLoadoutToVehicle();
+			SetupDriver(Character);
+			SetupGunner(Character);
+			break;
+		case E_SeatRole::Passenger:
+			break;
+	}
+
+	HandleViewMethod(Character, SeatData);
+}
+
+void AVehicle_Base::SetupDriver(ACharacter_Base* Character)
+{
+	Character->GetLocalPlayerHUDSystem()->SetupVehicleDriverHUD();
+
+	//start engine
+	UGameplayStatics::PlaySoundAtLocation(this, Cast<USoundBase>(VehicleData->GenericVehicleAudio.EngineStartupAudio), GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f);
+	if (!VehicleCurrentState.GenericVehicleState.EngineAudioComponent)
+	{
+		//setup engine audio
+		VehicleCurrentState.GenericVehicleState.EngineAudioComponent = NewObject<UAudioComponent>(this, UAudioComponent::StaticClass());
+		VehicleCurrentState.GenericVehicleState.EngineAudioComponent->RegisterComponent();
+		VehicleCurrentState.GenericVehicleState.EngineAudioComponent->AttachToComponent(GetRootComponent(), FAttachmentTransformRules::KeepRelativeTransform);
+		VehicleCurrentState.GenericVehicleState.EngineAudioComponent->SetActive(true);
+	}
+	//update engine audio (do sound cue on a timer instead?)
+	VehicleCurrentState.GenericVehicleState.EngineAudioComponent->SetSound(Cast<USoundBase>(VehicleData->GenericVehicleAudio.EngineAudio));
+	GetWorldTimerManager().SetTimer(TimerHandle_AudioUpdate_Engine, this, &AVehicle_Base::UpdateEngineAudio, 0.05f, true);
+	VehicleCurrentState.GenericVehicleState.EngineAudioComponent->Play();
+	//engine/whatever else start up audio
+}
+
+void AVehicle_Base::DropDriver()
+{
+	//shutdown engine
+	VehicleCurrentState.GenericVehicleState.EngineAudioComponent->Stop();
+	GetWorldTimerManager().ClearTimer(TimerHandle_AudioUpdate_Engine);
+	UGameplayStatics::PlaySoundAtLocation(this, Cast<USoundBase>(VehicleData->GenericVehicleAudio.EngineShutdownAudio), GetActorLocation(), FRotator::ZeroRotator, 1.0f, 1.0f, 0.0f);
+}
+
+void AVehicle_Base::SetupGunner(ACharacter_Base* Character)
+{
+	//called once on enter of a gunner seat, seat hud should already be on viewport
+	const FSeatData& SeatData = VehicleData->Seats[Character->CharacterState.CharacterVehicleState.CSI];
+	VehicleWeaponLogicComponent->BindToInput(Character);
+	if (SeatData.ViewMethod == E_ViewMethod::Windowed)
+	{
+		VehicleWeaponLogicComponent->WindowedRangefinder.AddDynamic(Character, &ACharacter_Base::UpdateRangefinder_WindowedVehicle);
+	}
+	Character->GetLocalPlayerHUDSystem()->SetupVehicleGunnerHUD();		//<-- all hud related bindings happen here
+
+	VehicleWeaponLogicComponent->SelectWeapon(Character->CharacterState.CharacterVehicleState.CSI, 0);
+}
+
+void AVehicle_Base::EnterVehicle(ACharacter_Base* Character)
+{
+	UE_LOG(LogTemp, Log, TEXT("ENTER VEHICLE"));
+	bool bFoundSeat = CycleThroughSeats(Character);
+	if (bFoundSeat)
+	{
+		Character->ManageinVehicleStatus(this, true);
+		SetupNewSeat(Character);
+		//do any "enter vehicle" specific stuff (open/close door/ "entering" animation, etc?
+	}
+}
+
+void AVehicle_Base::ChangeSeat(ACharacter_Base* Character)
+{
+	bool bFoundSeat = CycleThroughSeats(Character);
+	if (bFoundSeat)
+	{
+		DropSeat(Character);
+		SetupNewSeat(Character);
+	}
+}
+
+void AVehicle_Base::UpdateSeatActiveCamera(int32 SeatIndex, UCameraComponent* NewActiveCamera)
+{
+	VehicleCurrentState.SeatStates[SeatIndex].ActiveCamera = NewActiveCamera;
+}
+
+void AVehicle_Base::UpdateEngineAudio()
+{
+	switch (VehicleData->Movement_Type)
+	{
+		case E_MovementType::GroundVehicle:
+			VehicleCurrentState.GenericVehicleState.EngineAudioComponent->SetFloatParameter(FName("RPM"), FMath::Abs(ChaosVehicleMovement->GetEngineRotationSpeed()));
+			VehicleCurrentState.GenericVehicleState.EngineAudioComponent->SetFloatParameter(FName("Speed"), FMath::Abs(ChaosVehicleMovement->GetForwardSpeed() * 0.036f));
+			break;
+	}
+}
+
+void AVehicle_Base::HandleThrottle_GV(float InputValue)
+{
+	//if this doesnt work reference that 1 tutorial you did
+	if (InputValue > 0)
+	{
+		ChaosVehicleMovement->SetThrottleInput(InputValue);
+		OnVehicleSpeedUpdate.Broadcast();
+	}
+	if (InputValue < 0)
+	{
+		ChaosVehicleMovement->SetBrakeInput(FMath::Abs(InputValue));
+		OnVehicleSpeedUpdate.Broadcast();
+	}
+	if (InputValue == 0)
+	{
+		ChaosVehicleMovement->SetThrottleInput(0);
+		ChaosVehicleMovement->SetBrakeInput(0);
+		
+		GetWorld()->GetTimerManager().SetTimer(SpeedTimer, [this]()
+		{
+			OnVehicleSpeedUpdate.Broadcast();
+		}, 0.05f, true);
+		if (GetVelocity().Size() <= 0.0f)
+		{
+			GetWorld()->GetTimerManager().ClearTimer(SpeedTimer);
+		}
+	}
+}
+
+void AVehicle_Base::ApplySteering_GV(const FInputActionValue& SteeringValue)
+{
+	if (VehicleData->GroundVehicle_Data.canIdleTurn)
+	{
+		ChaosVehicleMovement->SetYawInput(SteeringValue.Get<float>());
+	}
+	else
+	{
+		ChaosVehicleMovement->SetSteeringInput(SteeringValue.Get<float>());
+	}
+	for (int32 i = 0; i < VehicleCurrentState.SeatStates.Num(); i++)
+	{
+		OnVehicleYawUpdate.Broadcast(i);
+		//when this broadcasts, EVERYONE should that update on their compass HUD side
+	}
+}
+
+void AVehicle_Base::ApplyThrottle(const FInputActionValue& ThrottleValue)
+{
+	E_MovementType VehicleType = VehicleData->Movement_Type;
+	switch (VehicleType)
+	{
+		case E_MovementType::GroundVehicle:
+			HandleThrottle_GV(ThrottleValue.Get<float>());
+			break;
+	}
+}
+
+void AVehicle_Base::ReleaseThrottle()
+{
+	E_MovementType VehicleType = VehicleData->Movement_Type;
+	switch (VehicleType)
+	{
+		case E_MovementType::GroundVehicle:
+			HandleThrottle_GV(0);
+			break;
+	}
+}
+
+USkeletalMeshComponent* AVehicle_Base::GetVehicleMesh() const
+{
+	return VehicleMeshComponent;
+}
+
+FName AVehicle_Base::GetVehicleID() const
+{
+	return VehicleStartingData.VehicleID;
+}
+
+const FVehicleData& AVehicle_Base::GetVehicleData() const
+{
+	return *VehicleData;
+}
+
+const FVehicleCurrentState& AVehicle_Base::GetVehicleState() const
+{
+	return VehicleCurrentState;
+}
+
+AVehicle_Base& AVehicle_Base::GetVehicle() 
+{
+	return *this;
+}
+
+
+
+
+

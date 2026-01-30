@@ -1,0 +1,100 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Data/Weapons/WeaponEnums.h"
+#include "WeaponTypes.generated.h"
+class AProjectile_Base;
+struct FBaseWeaponData;
+
+USTRUCT(BlueprintType)
+struct FLockOnState
+{
+
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	ELockOnState LockOnState = ELockOnState::NotLockingOn;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TWeakObjectPtr<AActor> AcquiredTarget;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)		//for laser-guided targets (JDAM's)
+	FVector DesignatedPoint = FVector::ZeroVector;
+
+	//potential lock on target? A thing acquired that can be locked on but hasn't actually been locked onto yet (should be a local var in whatever function)
+};
+
+USTRUCT(BlueprintType)		//Defines the structure of the runtime state
+struct FWeaponState
+{
+	//this is the weapon's state, meaning every property here can change at runtime (unlike instance data which SHOULD NOT change @runtime)
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	bool canFire = true;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	bool isFiring = false;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	bool isReloading = false;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	bool isWarmingUp = false;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	bool isEquipped = false;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	EFireMode CurrentFireMode = EFireMode::Auto;		//defined in weapon config data
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	int32 CurrentAmmoinMag = 0;
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	int32 CurrentReserveAmmo = 0;
+};
+
+//1 weapon's runtime data
+//gets set from Data_VehicleWeapon @runtime
+USTRUCT(BlueprintType)
+struct FWeapon_Runtime
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	FName WeaponID = NAME_None;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	FWeaponState WeaponState = FWeaponState();
+};
+
+USTRUCT(BlueprintType)
+struct FWeaponRaycastData_Runtime
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	FHitResult RangefinderData = FHitResult();
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	TArray<FVector> MuzzleAimDirections;
+};
+
+
+USTRUCT(BlueprintType)
+struct FEquippedWeaponState
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	int32 CurrentWeaponIndex = 0;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	FWeaponRaycastData_Runtime RaycastData = FWeaponRaycastData_Runtime();
+};
+
+USTRUCT(BlueprintType)
+struct FBaseWeaponSystem_Runtime
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	TArray <FWeapon_Runtime> Weapons;
+
+	UPROPERTY(BlueprintReadWrite, EditAnywhere)
+	FEquippedWeaponState EquippedWeaponState = FEquippedWeaponState();
+
+};

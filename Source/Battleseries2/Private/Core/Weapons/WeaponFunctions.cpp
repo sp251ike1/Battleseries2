@@ -1,0 +1,96 @@
+#include "Core/Weapons/WeaponFunctions.h"
+#include "Data/Runtime/WeaponTypes.h"
+#include "Data/Runtime/ProjectileTypes.h"
+#include "Utilities/ProjectilePoolSubsystem.h"
+
+float UWeaponFunctions::GetFireRate(float RateOfFire)
+{
+	RateOfFire = 60 / RateOfFire;
+	return RateOfFire;
+}
+
+FTransform UWeaponFunctions::GetMuzzleTransform(FName MuzzleSocketName, TWeakObjectPtr<USkeletalMeshComponent> SocketMesh)
+{
+	FTransform SocketTransform;
+	SocketTransform = SocketMesh->GetSocketTransform(MuzzleSocketName, RTS_World);
+	return SocketTransform;
+}
+
+FVector UWeaponFunctions::CalculateAimDirection(FHitResult TraceData, FVector MuzzleLocation)
+{
+	FVector TargetPoint = TraceData.bBlockingHit ? TraceData.ImpactPoint : TraceData.TraceEnd;
+	FVector RawAimDirection = (TargetPoint - MuzzleLocation).GetSafeNormal();
+	return RawAimDirection;
+}
+
+bool UWeaponFunctions::PerformWeaponLineTrace(const UObject* WorldContextObject, const FTransform& StartTransform, FHitResult& OutHit, TArray<AActor*> ActorsToIgnore)
+{
+	//if calling from any actor, WorldContextObject = this/self
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	FVector Startpoint = StartTransform.GetLocation();
+	FVector GetRotationXVector = StartTransform.GetRotation().Rotator().Vector();
+	FVector Endpoint = GetRotationXVector * 50000.0f + Startpoint;
+
+	FCollisionQueryParams Params;
+	Params.AddIgnoredActors(ActorsToIgnore);
+	bool bDidHit = World->LineTraceSingleByChannel(OutHit, Startpoint, Endpoint, ECC_Visibility, Params);
+	//DrawDebugLine(World, Startpoint, Endpoint, bDidHit ? FColor::Green : FColor::Red, false, 1.f, 0, 1.f);
+	return bDidHit;
+}
+
+int32 UWeaponFunctions::UpdateCurrentAmmoInMag(FWeapon_Runtime& CurrentWeapon, int32 AmmoDelta, int32 MagSize)
+{
+	CurrentWeapon.WeaponState.CurrentAmmoinMag = FMath::Clamp(CurrentWeapon.WeaponState.CurrentAmmoinMag + AmmoDelta, 0, MagSize);
+	if (CurrentWeapon.WeaponState.CurrentAmmoinMag == 0)
+	{
+		CurrentWeapon.WeaponState.canFire = false;
+		//CeaseFire();
+		//DryFire();
+	}
+	return CurrentWeapon.WeaponState.CurrentAmmoinMag;
+}
+
+int32 UWeaponFunctions::ReloadMag(int32 CAM, int32 CRA)
+{
+	return int32();
+}
+
+int32 UWeaponFunctions::UpdateWeaponIndex(TArray<FWeapon_Runtime> Weapons, int32 CurrentWeaponIndex)
+{
+	int32 NewWeaponIndex = CurrentWeaponIndex++;
+	if (!Weapons.IsValidIndex(NewWeaponIndex))
+	{
+		NewWeaponIndex = 0;
+	}
+	return NewWeaponIndex;
+}
+
+FProjectile_Runtime UWeaponFunctions::CreateSimProjectile(FName ProjectileID, FVector MuzzleLocation, float MuzzleSpeed, float GravityScale, FVector AimDirection, UProjectilePoolSubsystem* ProjectileSubsystem)
+{
+	FProjectile_Runtime NewSimulatedProjectile = FProjectile_Runtime();
+	NewSimulatedProjectile.ProjectileID = ProjectileID;
+	NewSimulatedProjectile.FireOrigin = MuzzleLocation;
+	NewSimulatedProjectile.CurrentLocation = MuzzleLocation;
+	NewSimulatedProjectile.CurrentVelocity = AimDirection * MuzzleSpeed;
+	NewSimulatedProjectile.GravityScale = GravityScale;
+	ProjectileSubsystem->AddNewSimProjectile(NewSimulatedProjectile);
+	return NewSimulatedProjectile;
+}
+
+void UWeaponFunctions::Debug_ProjectilePath(const UObject* WorldContextObject, FVector MuzzleLocation, FHitResult HitResult)
+{
+	UWorld* World = GEngine->GetWorldFromContextObject(WorldContextObject, EGetWorldErrorMode::LogAndReturnNull);
+	// DEBUG: Draw the convergence line
+	if (World)
+	{
+		// 1. Draw a line from the muzzle to the world hit point
+		// If the line hits the crosshair, your convergence math is perfect.
+		DrawDebugLine(World, MuzzleLocation, HitResult.ImpactPoint, FColor::Red, false, -1.f, 0, 1.0f);
+
+		// 2. Draw a small sphere at the muzzle to verify socket location
+		DrawDebugSphere(World, MuzzleLocation, 10.f, 8, FColor::Yellow, false, -1.f);
+
+		// 3. Draw a point at the Rangefinder impact (the Target)
+		DrawDebugPoint(World, HitResult.ImpactPoint, 15.f, FColor::Orange, false, -1.f);
+	}
+}
