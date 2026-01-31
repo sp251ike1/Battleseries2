@@ -59,10 +59,12 @@ void UHUDSubsystem::SetupVehicleGunnerHUD()
 	Vehicle->OnVehicleYawUpdate.AddUniqueDynamic(this, &UHUDSubsystem::UpdateCompassHUD_Vehicle);	
 	Vehicle->VehicleWeaponLogicComponent->OnTurretRotated.AddUniqueDynamic(this, &UHUDSubsystem::HandleTurretRotationUpdate);
 	Vehicle->VehicleWeaponLogicComponent->OnTurretPitched.AddUniqueDynamic(this, &UHUDSubsystem::HandleTurretPitchUpdate);
-	Vehicle->VehicleWeaponLogicComponent->OnVehicleWeaponSwapped.AddUniqueDynamic(this, &UHUDSubsystem::UpdateVehicleHUD_Weapon);
+	Vehicle->VehicleWeaponLogicComponent->OnVehicleWeaponSwapped.AddUniqueDynamic(this, &UHUDSubsystem::UpdateEquippedWeaponHUD_Vehicle);
+	//reload
+	//shoot
 
 	//call once to update/sync on start
-	UpdateVehicleHUD_Weapon(CSI);		
+	UpdateEquippedWeaponHUD_Vehicle(CSI);		//reticle, name, status
 	UpdateCompassHUD_Vehicle(CSI);
 	HandleTurretRotationUpdate(CSI);
 	HandleTurretPitchUpdate(CSI);
@@ -84,7 +86,7 @@ void UHUDSubsystem::UpdateSpeedHUD_Vehicle()
 	}
 }
 
-void UHUDSubsystem::UpdateVehicleHUD_Weapon(int32 SeatIndex)
+void UHUDSubsystem::UpdateEquippedWeaponHUD_Vehicle(int32 SeatIndex)
 {
 	//reticle, name, status (ready, wait)
 	APlayerController* PC = GetLocalPlayer()->GetPlayerController(GetWorld());
@@ -94,11 +96,18 @@ void UHUDSubsystem::UpdateVehicleHUD_Weapon(int32 SeatIndex)
 	{
 		return;
 	}
+
+	//reticle
 	int32& CWI = Vehicle->VehicleWeaponLogicComponent->VehicleWeaponSystem.Find(SeatIndex)->VehicleWeaponSystemState.EquippedWeaponState.CurrentWeaponIndex;
 	UpdateWeaponReticleHUD_Vehicle(Vehicle->VehicleWeaponLogicComponent->VehicleWeaponSystem.Find(SeatIndex)->Weapons[CWI].VehicleWeaponInstanceData.WeaponReticle);
+	UpdateWeaponReticleSize_Vehicle(Vehicle->VehicleWeaponLogicComponent->VehicleWeaponSystem.Find(SeatIndex)->Weapons[CWI].VehicleWeaponInstanceData.ReticleScale);
+
+	const FBaseWeaponData& StaticWeaponData = Vehicle->VehicleWeaponLogicComponent->GetBaseWeaponDataInSlot(SeatIndex, CWI);
+
+	//weapon name
+	UpdateWeaponNameHUD_Vehicle(StaticWeaponData.WeaponClassification.WeaponDisplayNameAbrev);
 
 	//weapon status
-	const FBaseWeaponData& StaticWeaponData = Vehicle->VehicleWeaponLogicComponent->GetBaseWeaponDataInSlot(SeatIndex, CWI);
 	FText WeaponStatus;
 	if (Vehicle->VehicleWeaponLogicComponent->VehicleWeaponSystem.Find(SeatIndex)->Weapons[CWI].VehicleWeaponState.BaseWeaponRuntimeData.WeaponState.isReloading)
 	{
@@ -108,7 +117,8 @@ void UHUDSubsystem::UpdateVehicleHUD_Weapon(int32 SeatIndex)
 	{
 		WeaponStatus = FText::FromString("READY");
 	}
-	UpdateWeaponHUD_Vehicle(StaticWeaponData.WeaponClassification.WeaponDisplayNameAbrev, WeaponStatus);
+	UpdateWeaponStatusHUD_Vehicle(WeaponStatus);
+
 }
 
 void UHUDSubsystem::UpdateWeaponReticleHUD_Vehicle(UTexture2D* ImageBrush)
@@ -120,6 +130,17 @@ void UHUDSubsystem::UpdateWeaponReticleHUD_Vehicle(UTexture2D* ImageBrush)
 	if (CurrentVehicleHUD->VehicleWeaponReticle)
 	{
 		CurrentVehicleHUD->VehicleWeaponReticle->UpdateReticleImage(ImageBrush);
+	}
+}
+
+void UHUDSubsystem::UpdateWeaponReticleSize_Vehicle(float NewScale)
+{
+	//for zoom optic and initial size
+	APlayerController* PC = GetLocalPlayer()->GetPlayerController(GetWorld());
+	ACharacter_Base* Character = (PC) ? Cast<ACharacter_Base>(PC->GetPawn()) : nullptr;
+	if (CurrentVehicleHUD->VehicleWeaponReticle)
+	{
+		CurrentVehicleHUD->VehicleWeaponReticle->UpdateReticleScale(NewScale);
 	}
 }
 
@@ -142,7 +163,7 @@ void UHUDSubsystem::UpdateRangefinderHUD_Vehicle(AVehicle_Base* ReportingVehicle
 	}
 }
 
-void UHUDSubsystem::UpdateWeaponHUD_Vehicle(FText WeaponDisplayName, FText WeaponStatus)
+void UHUDSubsystem::UpdateWeaponNameHUD_Vehicle(FText WeaponDisplayName)
 {
 	APlayerController* PC = GetLocalPlayer()->GetPlayerController(GetWorld());
 	ACharacter_Base* Character = (PC) ? Cast<ACharacter_Base>(PC->GetPawn()) : nullptr;
@@ -150,7 +171,17 @@ void UHUDSubsystem::UpdateWeaponHUD_Vehicle(FText WeaponDisplayName, FText Weapo
 	AVehicle_Base* Vehicle = Character->CharacterState.CharacterVehicleState.CurrentVehicle;
 	if (CurrentVehicleHUD->VehicleWeaponStatus)
 	{
-		CurrentVehicleHUD->VehicleWeaponStatus->UpdateWeapon(WeaponDisplayName, WeaponStatus);
+		CurrentVehicleHUD->VehicleWeaponStatus->UpdateWeaponName(WeaponDisplayName);
+	}
+}
+
+void UHUDSubsystem::UpdateWeaponStatusHUD_Vehicle(FText WeaponStatus)
+{
+	APlayerController* PC = GetLocalPlayer()->GetPlayerController(GetWorld());
+	ACharacter_Base* Character = (PC) ? Cast<ACharacter_Base>(PC->GetPawn()) : nullptr;
+	if (CurrentVehicleHUD->VehicleWeaponStatus)
+	{
+		CurrentVehicleHUD->VehicleWeaponStatus->UpdateWeaponStatus(WeaponStatus);
 	}
 }
 

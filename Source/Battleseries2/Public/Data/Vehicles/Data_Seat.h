@@ -54,6 +54,9 @@ struct FVehicleWeaponInstanceData
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bHasSeparateMesh = false;
 
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ToolTip = "Recoil multiplier that gets multiplied to angular impulse"))
+	float RecoilMultiplier = 0.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (Tooltip = "The mesh for this weapon if not just part of the vehicle mesh", EditCondition = "bHasSeparateMesh", EditConditionHides = true))
 	FName AttachmentID = FName();
 
@@ -69,8 +72,11 @@ struct FVehicleWeaponInstanceData
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	bool bAreProjectilesMounted = false;
 
+	//reticle data
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	UTexture2D* WeaponReticle = nullptr;		//russian reticle for tank shell in t72/t90, etc
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float ReticleScale = 1.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	TArray<FDecorative> WeaponDecoratives;

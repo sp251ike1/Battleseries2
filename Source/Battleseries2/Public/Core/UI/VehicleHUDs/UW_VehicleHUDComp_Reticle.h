@@ -12,10 +12,14 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (BindWidget))
 	class UImage* Reticle = nullptr;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (BindWidget))
+	class UScaleBox* ScaleBox_Reticle = nullptr;
+
 	virtual void NativeConstruct() override;
 
 	UFUNCTION(BlueprintCallable)
 	void UpdateReticleImage(UTexture2D* ImageBrush);
-
+	UFUNCTION(BlueprintCallable)
+	void UpdateReticleScale(float NewScale);
 
 };

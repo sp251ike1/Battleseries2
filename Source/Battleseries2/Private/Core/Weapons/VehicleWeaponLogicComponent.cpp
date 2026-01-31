@@ -762,9 +762,10 @@ void UVehicleWeaponLogicComponent::StartFire(int32 SeatIndex)
 void UVehicleWeaponLogicComponent::FireVehicleWeapon(int32 SeatIndex)
 {
 	FVehicleWeaponSystem_Runtime& SeatWeaponSystem = *VehicleWeaponSystem.Find(SeatIndex);
-	FVehicleWeapon_Runtime& VehicleWeapon = SeatWeaponSystem.Weapons[SeatWeaponSystem.VehicleWeaponSystemState.EquippedWeaponState.CurrentWeaponIndex];
+	int32& CWI = SeatWeaponSystem.VehicleWeaponSystemState.EquippedWeaponState.CurrentWeaponIndex;
+	FVehicleWeapon_Runtime& VehicleWeapon = SeatWeaponSystem.Weapons[CWI];
 	FVehicleWeaponState& VehicleWeaponState = VehicleWeapon.VehicleWeaponState;
-	const FBaseWeaponData& StaticWeaponData = GetBaseWeaponDataInSlot(SeatIndex, SeatWeaponSystem.VehicleWeaponSystemState.EquippedWeaponState.CurrentWeaponIndex);
+	const FBaseWeaponData& StaticWeaponData = GetBaseWeaponDataInSlot(SeatIndex, CWI);
 	FWeapon_Runtime& CurrentWeapon = VehicleWeaponState.BaseWeaponRuntimeData;
 	switch (StaticWeaponData.WeaponFireData.WeaponFireType)
 	{
@@ -815,6 +816,8 @@ void UVehicleWeaponLogicComponent::FireVehicleWeapon(int32 SeatIndex)
 			break;
 	}
 
+	ApplyWeaponRecoilJostle(SeatIndex, CWI);
+
 	//update muzzle
 	switch (VehicleWeapon.VehicleWeaponInstanceData.FireMethod)
 	{
@@ -836,6 +839,32 @@ void UVehicleWeaponLogicComponent::FireVehicleWeapon(int32 SeatIndex)
 	}
 	//handle ammo depletion
 
+}
+
+void UVehicleWeaponLogicComponent::ApplyWeaponRecoilJostle(int32 SeatIndex, int32 WeaponIndex)
+{
+	FVehicleWeaponSystem_Runtime& SeatWeaponSystem = *VehicleWeaponSystem.Find(SeatIndex);
+	float RecoilMultiplier = SeatWeaponSystem.Weapons[WeaponIndex].VehicleWeaponInstanceData.RecoilMultiplier;
+
+	//RECOIL
+	//vehicle mesh anim fire
+	if (OwnerDataAccessor->GetVehicleMesh()->GetAnimInstance()->GetClass()->ImplementsInterface(UAnims::StaticClass()))
+	{
+		IAnims::Execute_OnFireWeapon_Vehicle(OwnerDataAccessor->GetVehicleMesh()->GetAnimInstance(), SeatIndex, WeaponIndex);
+	}
+
+	//jostle
+	AVehicle_Base& Vehicle = OwnerDataAccessor->GetVehicle();
+	UPrimitiveComponent* RootBody = Cast<UPrimitiveComponent>(Vehicle.GetRootComponent());
+	int32 TurretIndex = OwnerDataAccessor->GetVehicleData().Seats[SeatIndex].AvailableItems.ControlledTurretIndexes[0];
+	float RelativeYaw = GetTurretWorldYaw(TurretIndex);
+	float RadianYaw = FMath::DegreesToRadians(RelativeYaw);
+	float PitchFactor = FMath::Cos(RadianYaw);
+	float RollFactor = FMath::Sin(RadianYaw);
+	FVector HullRight = Vehicle.GetActorRightVector();
+	FVector HullForward = Vehicle.GetActorForwardVector();
+	FVector JostleTorque = (HullRight * -PitchFactor) + (HullForward * -RollFactor);
+	RootBody->AddAngularImpulseInDegrees(JostleTorque * RecoilMultiplier, NAME_None, true);
 }
 
 void UVehicleWeaponLogicComponent::StopFire(int32 SeatIndex)

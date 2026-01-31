@@ -15,7 +15,7 @@ public:
 	class UTextBlock* T_WeaponStatus;		//ready, wait
 
 	UFUNCTION(BlueprintCallable)
-	void UpdateWeapon(FText WeaponName, FText WeaponStatus);
+	void UpdateWeaponName(FText WeaponName);
 	UFUNCTION(BlueprintCallable)
 	void UpdateWeaponStatus(FText WeaponStatus);
 };

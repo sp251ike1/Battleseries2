@@ -110,6 +110,8 @@ struct FWeaponAudioData
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Exterior")
 	TSoftObjectPtr<USoundWave> FireStop; // Exterior echo/tail
 
+	//what should be vehicle instance data?
+
 	// --- INTERNAL / MECHANICAL (The "Hammer" & "Slide") ---
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Interior")
 	TArray<TSoftObjectPtr<USoundWave>> MechanicalImpacts; // The "Hammer" hitting the anvil
@@ -140,6 +142,9 @@ struct FAmmoData
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly)
 	EAmmoDepletionMethod AmmoDepletionMethod = EAmmoDepletionMethod::Default;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly)
+	float ReloadSpeed = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, meta = (ToolTip = "Maximum ammo in one magazine"))
 	int32 MagSize = 0;

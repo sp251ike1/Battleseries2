@@ -209,6 +209,8 @@ public:
 	UFUNCTION(BlueprintCallable)
 	void FireVehicleWeapon(int32 SeatIndex);
 	UFUNCTION(BlueprintCallable)
+	void ApplyWeaponRecoilJostle(int32 SeatIndex, int32 WeaponIndex);
+	UFUNCTION(BlueprintCallable)
 	void StopFire(int32 SeatIndex);
 	UFUNCTION(BlueprintCallable)
 	void StopWeaponSlotFire(int32 SeatIndex, int32 WeaponIndex);

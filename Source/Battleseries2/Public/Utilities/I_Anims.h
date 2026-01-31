@@ -18,4 +18,7 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Anim Interface")
 	void OnUpdateTurret(float Rotation, float Pitch);
 
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Anim Interface")
+	void OnFireWeapon_Vehicle(int32 SeatIndex, int32 WeaponIndex);
+
 };
