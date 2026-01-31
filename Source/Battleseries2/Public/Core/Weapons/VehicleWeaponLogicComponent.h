@@ -233,6 +233,7 @@ public:
 	int32 GetSeatIndexForTurret(int32 TurretIndex);
 
 protected:
+	//(SeatIndex, [WeaponIndex] BaseWeaponData)
 	TMap<int32, TArray<const FBaseWeaponData*>> CurrentVehicleBaseWeaponData;		//the static base weapon data of each weapon slot in each seat 
 	//current VehicleInstanceWeaponData?
 

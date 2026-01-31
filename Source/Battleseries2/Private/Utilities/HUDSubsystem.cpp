@@ -106,6 +106,9 @@ void UHUDSubsystem::UpdateEquippedWeaponHUD_Vehicle(int32 SeatIndex)
 
 	//weapon name
 	UpdateWeaponNameHUD_Vehicle(StaticWeaponData.WeaponClassification.WeaponDisplayNameAbrev);
+	FName WeaponID = Vehicle->VehicleWeaponLogicComponent->VehicleWeaponSystem.Find(SeatIndex)->Weapons[CWI].VehicleWeaponState.BaseWeaponRuntimeData.WeaponID;
+	UE_LOG(LogTemp, Warning, TEXT("[HUDSubsystem::UpdateEquippedWeaponHUD_Vehicle] WeaponID = %s"), *WeaponID.ToString());
+	UE_LOG(LogTemp, Warning, TEXT("[HUDSubsystem::UpdateEquippedWeaponHUD_Vehicle] WeaponDisplayNameAbrev = %s"), *StaticWeaponData.WeaponClassification.WeaponDisplayNameAbrev.ToString());
 
 	//weapon status
 	FText WeaponStatus;

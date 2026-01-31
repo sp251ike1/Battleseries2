@@ -173,8 +173,18 @@ void UVehicleWeaponLogicComponent::ApplyWeaponAtIndexToSeat(int32 SeatIndex, int
 		ClearWeaponSlotFromSeat(SeatIndex, WeaponIndex);
 	}
 
+	//base weapon data
 	DefaultWeaponDataToFill.WeaponID = WeaponID;
-	CurrentVehicleBaseWeaponData.Find(SeatIndex)->Add(BaseWeaponData);
+	TArray<const FBaseWeaponData*>& BaseWeaponDataArray = CurrentVehicleBaseWeaponData.FindOrAdd(SeatIndex);
+
+	// 2. Ensure array is large enough for the index
+	if (!BaseWeaponDataArray.IsValidIndex(WeaponIndex))
+	{
+		BaseWeaponDataArray.SetNum(WeaponIndex + 1);
+	}
+
+	BaseWeaponDataArray[WeaponIndex] = BaseWeaponData;
+	//CurrentVehicleBaseWeaponData.Find(SeatIndex)->Add(BaseWeaponData);
 
 	//initialize state on weapon side
 	//make apply WeaponStateToSeat function?
@@ -965,13 +975,14 @@ const FBaseWeaponData& UVehicleWeaponLogicComponent::GetBaseWeaponDataInSlot(int
 
 float UVehicleWeaponLogicComponent::GetTurretWorldYaw(int32 TurretIndex)
 {
+	UE_LOG(LogTemp, Warning, TEXT("[VWLC::GetTurretWorldYaw] TurretIndex = %d"), TurretIndex);
 	const FTurretState& TurretState = TurretStates[TurretIndex];
 	const FTurretData& TurretData = OwnerDataAccessor->GetVehicleData().Turrets[TurretIndex];
 	float HullWorldYaw = OwnerDataAccessor->GetVehicle().GetActorRotation().Yaw;
 
 	int32 SI = GetSeatIndexForTurret(TurretIndex);
 
-	TSoftObjectPtr<USkeletalMeshComponent> TurretMesh = VehicleWeaponSystem.Find(SI)->VehicleWeaponSystemState.WeaponSystemMesh.Get();
+	TWeakObjectPtr<USkeletalMeshComponent> TurretMesh = VehicleWeaponSystem.Find(SI)->VehicleWeaponSystemState.WeaponSystemMesh.Get();
 	FName SocketName = VehicleWeaponSystem.Find(SI)->Weapons[VehicleWeaponSystem.Find(SI)->VehicleWeaponSystemState.EquippedWeaponState.CurrentWeaponIndex].VehicleWeaponState.MuzzleSockets[0];
 	float TurretWorldYaw;
 	if (TurretMesh.IsValid())
